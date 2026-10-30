@@ -23,7 +23,7 @@ def get_garmin_data():
     return response.text
 
 def get_google_calendar_events():
-    """Holt den Access Token manuell über ein signiertes JWT."""
+    """Holt den Access Token manuell über ein signiertes JWT und baut die Credentials sauber auf."""
     print("Verbinde mit Google Calendar (Manueller JWT-Auth)...")
     info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
     
@@ -34,7 +34,7 @@ def get_google_calendar_events():
         'iss': info['client_email'],
         'sub': info['client_email'],
         'scope': 'https://googleapis.com',
-        'aud': 'https://googleapis.com',  # Erzwingt den Token-Endpunkt
+        'aud': 'https://googleapis.com',
         'iat': iat,
         'exp': exp
     }
@@ -58,9 +58,15 @@ def get_google_calendar_events():
         
     access_token = token_data['access_token']
     
-    # 4. Den API Service mit dem manuellen Token füttern
+    # 4. FIX: Das Credentials-Objekt mit allen benötigten Attributen für 'build' befüllen
     from google.oauth2.credentials import Credentials
-    creds = Credentials(token=access_token)
+    creds = Credentials(
+        token=access_token,
+        token_uri='https://googleapis.com',
+        client_id=info.get('client_id'),
+        scopes=['https://googleapis.com']
+    )
+    
     service = build('calendar', 'v3', credentials=creds)
     
     now = datetime.utcnow().isoformat() + 'Z'
