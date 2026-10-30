@@ -1,0 +1,40 @@
+name: Garmin Coach Calendar Sync
+
+# Definiert, wann die Action automatisch startet
+on:
+  schedule:
+    # Läuft alle 6 Stunden (um 00:00, 06:00, 12:00 und 18:00 Uhr UTC)
+    - cron: '0 */6 * * *'
+  
+  # Ermöglicht es dir, den Sync jederzeit manuell per Klick in GitHub zu starten
+  workflow_dispatch:
+
+jobs:
+  run-sync-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Holt den Code aus deinem Repository
+      - name: Checkout Repository Code
+        uses: actions/checkout@v4
+
+      # 2. Richtet die passende Python-Umgebung ein
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip' # Beschleunigt zukünftige Durchläufe
+
+      # 3. Installiert alle benötigten Bibliotheken für Google und Gemini
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests google-auth google-api-python-client google-genai
+
+      # 4. Führt das Skript aus und übergibt die verschlüsselten Secrets
+      - name: Run Calendar Sync Script
+        env:
+          GARMIN_URL: ${{ secrets.GARMIN_URL }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python main.py
