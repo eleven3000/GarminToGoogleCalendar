@@ -3,10 +3,9 @@ import json
 import requests
 import time
 from datetime import datetime, timedelta
-from google import genai
-from google.genai import types
-import jwt
+import jwt  # Pure PyJWT
 
+# Umgebungsvariablen von GitHub Secrets
 GARMIN_URL = os.environ.get("GARMIN_URL")
 GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_CREDENTIALS")
 os.environ["GEMINI_API_KEY"] = os.environ.get("GEMINI_API_KEY", "")
@@ -14,27 +13,22 @@ os.environ["GEMINI_API_KEY"] = os.environ.get("GEMINI_API_KEY", "")
 HEUTE = datetime.now().date()
 
 def get_garmin_data():
-    """Lädt die iCal-Datei von Garmin herunter und nutzt einen echten Browser-Header."""
+    """Lädt die iCal-Datei von Garmin herunter."""
     print("Lade Garmin iCal-Daten...")
-    # Ein 'User-Agent' simuliert einen echten Browser, damit Garmin den Download nicht blockiert
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
     response = requests.get(GARMIN_URL, headers=headers)
-    
-    # Falls Garmin blockiert, sehen wir jetzt genau warum:
-    if response.status_code != 200:
-        raise Exception(f"Garmin Download fehlgeschlagen! Status: {response.status_code}, Inhalt: {response.text[:200]}")
-        
+    response.raise_for_status()
     return response.text
 
 def get_google_access_token(info):
-    """Generiert ein reines JWT und holt den Token mit den korrekten HTTP-Headern ab."""
+    """Holt den Access Token unabhängig von der GenAI-Library ab."""
     print("Generiere sicheren OAuth-Token via PyJWT...")
     iat = int(time.time())
     exp = iat + 3600
     
-    GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
+    GOOGLE_TOKEN_URL = 'https://googleapis.com'
     
     payload = {
         'iss': info['client_email'],
@@ -47,32 +41,25 @@ def get_google_access_token(info):
     private_key = info['private_key']
     signed_jwt = jwt.encode(payload, private_key, algorithm='RS256')
     
-    # NEU: Wir setzen die Content-Type-Header explizit so, wie Google es erwartet
     headers = {
         "Content-Type": "application/x-www-form-urlencoded"
     }
-    
     data = {
         'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
         'assertion': signed_jwt
     }
     
     token_response = requests.post(GOOGLE_TOKEN_URL, headers=headers, data=data)
-    
-    if token_response.status_code != 200:
-        raise Exception(f"Google Token-Request fehlgeschlagen! Status: {token_response.status_code}, Inhalt: {token_response.text}")
-        
     token_data = token_response.json()
+    
     if 'access_token' not in token_data:
         raise Exception(f"Google OAuth fehlgeschlagen: {token_data}")
         
     return token_data['access_token']
 
-
 def get_google_calendar_events(access_token):
     """Holt alle Termine der nächsten 7 Tage direkt via HTTP REST-API."""
     print("Verbinde mit Google Calendar (Direkter HTTP Request)...")
-    
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Accept": "application/json"
@@ -82,9 +69,8 @@ def get_google_calendar_events(access_token):
     url = f"https://googleapis.com{now}&maxResults=100&singleEvents=true&orderBy=startTime"
     
     response = requests.get(url, headers=headers)
-    if response.status_code != 200:
-        raise Exception(f"Google Kalender-Abruf fehlgeschlagen! Status: {response.status_code}, Inhalt: {response.text}")
-        
+    response.raise_for_status()
+    
     events = response.json().get('items', [])
     cleaned_events = []
     for e in events:
@@ -96,8 +82,11 @@ def get_google_calendar_events(access_token):
     return cleaned_events
 
 def ask_gemini_for_schedule(garmin_ical, google_events):
-    """Nutzt das kostenlose Gemini 1.5 Flash Modell für die smarte Planung."""
+    """Imports sind hier isoliert, damit sie die Kalender-Authentifizierung nicht stören."""
     print("Frage Gemini nach optimalen Zeitfenstern...")
+    from google import genai
+    from google.genai import types
+    
     client = genai.Client()
     
     prompt = f"""
@@ -163,9 +152,11 @@ def main():
         info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
         garmin_ical = get_garmin_data()
         
+        # Erst den Google Kalender Token holen
         access_token = get_google_access_token(info)
         google_events = get_google_calendar_events(access_token)
         
+        # Erst JETZT rufen wir Gemini auf
         ki_plan = ask_gemini_for_schedule(garmin_ical, google_events)
         add_events_to_google(access_token, google_events, ki_plan)
         print("Sync-Vorgang erfolgreich beendet!")
