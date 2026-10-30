@@ -148,10 +148,9 @@ def get_calendar_events(access_token):
             
     return hard_commitments, managed_workouts
 
-def reconcile_with_gemini(upcoming_workouts, hard_commitments, managed_workouts):
-    """Gemini evaluates conflicts and schedules slots."""
+def reconcile_with_gemini(upcoming_workouts, hard_commitments, managed_workouts, max_retries=4):
+    """Gemini evaluates conflicts and schedules slots with automatic retry on 503/server errors."""
     print("Asking Gemini to reconcile and reschedule workouts...")
-    # Initialize without the 60s hard timeout header
     client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = f"""
@@ -177,17 +176,27 @@ def reconcile_with_gemini(upcoming_workouts, hard_commitments, managed_workouts)
     5. Always format start/end as valid ISO 8601 strings with timezone offset (e.g., +01:00 or +02:00).
     """
 
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=list[ReconciledEvent],
-            # Use 'low' thinking to respond in seconds and prevent timeouts
-            thinking_config=types.ThinkingConfig(thinking_level="low")
-        ),
-    )
-    return json.loads(response.text)
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=list[ReconciledEvent],
+                    thinking_config=types.ThinkingConfig(thinking_level="low")
+                ),
+            )
+            return json.loads(response.text)
+
+        except Exception as e:
+            # Check if it's a temporary 503 / 429 server capacity issue
+            if ("503" in str(e) or "429" in str(e) or "UNAVAILABLE" in str(e)) and attempt < max_retries:
+                wait_time = attempt * 7  # Waits 7s, 14s, 21s
+                print(f"Google API busy (503/429). Retrying attempt {attempt}/{max_retries} in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                raise e
 
 def apply_sync_actions(access_token, plan):
     """Executes POST, PATCH, or DELETE on Google Calendar API."""
