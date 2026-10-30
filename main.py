@@ -4,18 +4,15 @@ import requests
 from datetime import datetime, timedelta
 from google import genai
 from google.genai import types
-from google.oauth2.service_account import Credentials
+from google.oauth2 import service_account  # Wichtig für den Fix
 from googleapiclient.discovery import build
 
 # Umgebungsvariablen von GitHub Secrets
 GARMIN_URL = os.environ.get("GARMIN_URL")
 GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_CREDENTIALS")
-# Google GenAI sucht standardmäßig nach 'GEMINI_API_KEY' in den Secrets
 os.environ["GEMINI_API_KEY"] = os.environ.get("GEMINI_API_KEY", "")
 
-# Zeitfenster definieren (Heute bis in 7 Tagen)
 HEUTE = datetime.now().date()
-IN_EINER_WOCHE = HEUTE + timedelta(days=7)
 
 def get_garmin_data():
     """Lädt die statische iCal-Datei von Garmin herunter."""
@@ -25,13 +22,18 @@ def get_garmin_data():
     return response.text
 
 def get_google_calendar_events():
-    """Verbindet sich mit Google und holt alle Termine der nächsten 7 Tage."""
+    """Verbindet sich sicher mit Google via Service Account (FIXED)."""
     print("Verbinde mit Google Calendar...")
     info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
-    creds = Credentials.from_service_account_info(info, scopes=['https://googleapis.com'])
+    
+    # FIX: Wir nutzen hier 'from_service_account_info' explizit mit dem richtigen Scope,
+    # damit Google uns den echten Access Token anstelle des ID-Tokens ausstellt.
+    scopes = ['https://googleapis.com']
+    creds = service_account.Credentials.from_service_account_info(info, scopes=scopes)
+    
+    # Das 'creds'-Objekt wird direkt an build() übergeben
     service = build('calendar', 'v3', credentials=creds)
     
-    # Ab jetzt (ISO-Format mit Zeitzone)
     now = datetime.utcnow().isoformat() + 'Z'
     events_result = service.events().list(
         calendarId='primary', timeMin=now,
@@ -70,7 +72,6 @@ def ask_gemini_for_schedule(garmin_ical, google_events):
     {garmin_ical}
     """
     
-    # Strukturierte JSON-Ausgabe erzwingen
     response = client.models.generate_content(
         model='gemini-1.5-flash',
         contents=prompt,
@@ -84,13 +85,11 @@ def ask_gemini_for_schedule(garmin_ical, google_events):
 
 def add_events_to_google(service, current_events, new_events):
     """Trägt Termine nur ein, wenn sie nicht schon existieren (Duplikats-Schutz)."""
-    # Erstelle eine Liste aller bestehenden Titel zur schnellen Prüfung
     existing_titles = [e['summary'].lower() for e in current_events if e.get('summary')]
 
     for event in new_events:
         title = event.get('summary', 'Garmin Workout')
         
-        # Duplikats-Prüfung: Wenn das Training vom Namen her schon im Kalender steht, überspringen
         if title.lower() in existing_titles:
             print(f"Übersprungen (bereits eingetragen): {title}")
             continue
