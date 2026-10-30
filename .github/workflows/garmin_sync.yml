@@ -21,12 +21,12 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          # Wir schmeißen alle google-auth Pakete raus und nutzen nur pyjwt[crypto]
-          pip install requests google-genai "pyjwt[crypto]"
+          pip install requests google-genai "pyjwt[crypto]" pydantic
 
       - name: Run Calendar Sync Script
         env:
           GARMIN_URL: ${{ secrets.GARMIN_URL }}
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CALENDAR_ID: ${{ secrets.CALENDAR_ID }}   # e.g. yourname@gmail.com
         run: python main.py
