@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timedelta
 from google import genai
 from google.genai import types
-from google.auth import jwt
+import jwt  # <--- Nutzt jetzt das pure 'PyJWT' Paket, KEIN google-auth mehr!
 
 # Umgebungsvariablen von GitHub Secrets
 GARMIN_URL = os.environ.get("GARMIN_URL")
@@ -22,9 +22,11 @@ def get_garmin_data():
     return response.text
 
 def get_google_access_token(info):
-    """Holt den Access Token manuell über ein signiertes JWT direkt via HTTP."""
+    """Generiert ein reines JWT und holt den Token via HTTP POST."""
+    print("Generiere sicheren OAuth-Token via PyJWT...")
     iat = int(time.time())
     exp = iat + 3600
+    
     payload = {
         'iss': info['client_email'],
         'sub': info['client_email'],
@@ -34,8 +36,9 @@ def get_google_access_token(info):
         'exp': exp
     }
     
-    signer = jwt.Credentials.from_service_account_info(info)
-    signed_jwt = jwt.encode(signer._signer, payload)
+    # Signiert den Token direkt mit dem privaten Schlüssel aus dem JSON
+    private_key = info['private_key']
+    signed_jwt = jwt.encode(payload, private_key, algorithm='RS256')
     
     token_response = requests.post(
         'https://googleapis.com',
@@ -61,7 +64,6 @@ def get_google_calendar_events(access_token):
     }
     
     now = datetime.utcnow().isoformat() + 'Z'
-    # Wir rufen die Google Calendar API direkt über die URL auf
     url = f"https://googleapis.com{now}&maxResults=100&singleEvents=true&orderBy=startTime"
     
     response = requests.get(url, headers=headers)
@@ -143,7 +145,6 @@ def main():
         info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
         garmin_ical = get_garmin_data()
         
-        # Token holen und die Funktionen füttern
         access_token = get_google_access_token(info)
         google_events = get_google_calendar_events(access_token)
         
