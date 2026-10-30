@@ -1,12 +1,12 @@
 import os
 import json
 import requests
+import time
 from datetime import datetime, timedelta
 from google import genai
 from google.genai import types
-from google.oauth2 import service_account
+from google.auth import jwt  # Nutzt JWT statt des verbuggten Refresh-Mechanismus
 from googleapiclient.discovery import build
-import google.auth.transport.requests
 
 # Umgebungsvariablen von GitHub Secrets
 GARMIN_URL = os.environ.get("GARMIN_URL")
@@ -23,20 +23,44 @@ def get_garmin_data():
     return response.text
 
 def get_google_calendar_events():
-    """Verbindet sich mit Google und erzwingt das richtige Token-Format."""
-    print("Verbinde mit Google Calendar...")
+    """Holt den Access Token manuell über ein signiertes JWT."""
+    print("Verbinde mit Google Calendar (Manueller JWT-Auth)...")
     info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
     
-    # Hier definieren wir den Scope exakt
-    scopes = ['https://googleapis.com']
-    creds = service_account.Credentials.from_service_account_info(info, scopes=scopes)
+    # 1. Wir bauen den JWT-Claim manuell auf
+    iat = int(time.time())
+    exp = iat + 3600
+    payload = {
+        'iss': info['client_email'],
+        'sub': info['client_email'],
+        'scope': 'https://googleapis.com',
+        'aud': 'https://googleapis.com',  # Erzwingt den Token-Endpunkt
+        'iat': iat,
+        'exp': exp
+    }
     
-    # RADIKALER FIX: Wir zwingen Google hier manuell, das Token abzurufen.
-    # Das löst das 'No access token in response'-Problem in Cloud-Containern.
-    request = google.auth.transport.requests.Request()
-    creds.refresh(request)
+    # 2. Signieren des Tokens mit dem Private Key aus dem Secret
+    signer = jwt.Credentials.from_service_account_info(info)
+    signed_jwt = jwt.encode(signer._signer, payload)
     
-    # Service mit den frisch erzwungenen Credentials aufbauen
+    # 3. Den echten Access Token direkt via HTTP POST abholen
+    token_response = requests.post(
+        'https://googleapis.com',
+        data={
+            'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+            'assertion': signed_jwt
+        }
+    )
+    
+    token_data = token_response.json()
+    if 'access_token' not in token_data:
+        raise Exception(f"Google OAuth fehlgeschlagen: {token_data}")
+        
+    access_token = token_data['access_token']
+    
+    # 4. Den API Service mit dem manuellen Token füttern
+    from google.oauth2.credentials import Credentials
+    creds = Credentials(token=access_token)
     service = build('calendar', 'v3', credentials=creds)
     
     now = datetime.utcnow().isoformat() + 'Z'
