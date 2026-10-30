@@ -151,10 +151,8 @@ def get_calendar_events(access_token):
 def reconcile_with_gemini(upcoming_workouts, hard_commitments, managed_workouts):
     """Gemini evaluates conflicts and schedules slots."""
     print("Asking Gemini to reconcile and reschedule workouts...")
-    client = genai.Client(
-        api_key=GEMINI_API_KEY,
-        http_options=types.HttpOptions(timeout=60000)  # 60-second timeout
-    )
+    # Initialize without the 60s hard timeout header
+    client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = f"""
     You are a calendar reconciliation assistant.
@@ -184,7 +182,9 @@ def reconcile_with_gemini(upcoming_workouts, hard_commitments, managed_workouts)
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_schema=list[ReconciledEvent]
+            response_schema=list[ReconciledEvent],
+            # Use 'low' thinking to respond in seconds and prevent timeouts
+            thinking_config=types.ThinkingConfig(thinking_level="low")
         ),
     )
     return json.loads(response.text)
