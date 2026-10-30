@@ -29,16 +29,17 @@ def get_garmin_data():
     return response.text
 
 def get_google_access_token(info):
-    """Generiert ein reines JWT und holt den Token via HTTP POST."""
+    """Generiert ein reines JWT und holt den Token mit den korrekten HTTP-Headern ab."""
     print("Generiere sicheren OAuth-Token via PyJWT...")
     iat = int(time.time())
     exp = iat + 3600
     
+    GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
+    
     payload = {
         'iss': info['client_email'],
-        'sub': info['client_email'],
         'scope': 'https://googleapis.com',
-        'aud': 'https://googleapis.com',
+        'aud': GOOGLE_TOKEN_URL,
         'iat': iat,
         'exp': exp
     }
@@ -46,15 +47,18 @@ def get_google_access_token(info):
     private_key = info['private_key']
     signed_jwt = jwt.encode(payload, private_key, algorithm='RS256')
     
-    token_response = requests.post(
-        'https://googleapis.com',
-        data={
-            'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-            'assertion': signed_jwt
-        }
-    )
+    # NEU: Wir setzen die Content-Type-Header explizit so, wie Google es erwartet
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
     
-    # Falls Google hier fehlschlägt, fangen wir den Text ab, bevor der JSON-Parser abstürzt
+    data = {
+        'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        'assertion': signed_jwt
+    }
+    
+    token_response = requests.post(GOOGLE_TOKEN_URL, headers=headers, data=data)
+    
     if token_response.status_code != 200:
         raise Exception(f"Google Token-Request fehlgeschlagen! Status: {token_response.status_code}, Inhalt: {token_response.text}")
         
@@ -63,6 +67,7 @@ def get_google_access_token(info):
         raise Exception(f"Google OAuth fehlgeschlagen: {token_data}")
         
     return token_data['access_token']
+
 
 def get_google_calendar_events(access_token):
     """Holt alle Termine der nächsten 7 Tage direkt via HTTP REST-API."""
