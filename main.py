@@ -151,7 +151,10 @@ def get_calendar_events(access_token):
 def reconcile_with_gemini(upcoming_workouts, hard_commitments, managed_workouts, max_retries=4):
     """Gemini evaluates conflicts and schedules slots with automatic retry on 503/server errors."""
     print("Asking Gemini to reconcile and reschedule workouts...")
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    client = genai.Client(
+        api_key=GEMINI_API_KEY,
+        http_options=types.HttpOptions(timeout=300000)  # 5 minutes in ms
+    )
     
     prompt = f"""
     You are a calendar reconciliation assistant.

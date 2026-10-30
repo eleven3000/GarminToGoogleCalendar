@@ -8,6 +8,7 @@ on:
 jobs:
   run-sync-script:
     runs-on: ubuntu-latest
+    timeout-minutes: 7
 
     steps:
       - name: Checkout Repository Code
