@@ -5,9 +5,8 @@ import time
 from datetime import datetime, timedelta
 from google import genai
 from google.genai import types
-import jwt  # <--- Nutzt jetzt das pure 'PyJWT' Paket, KEIN google-auth mehr!
+import jwt
 
-# Umgebungsvariablen von GitHub Secrets
 GARMIN_URL = os.environ.get("GARMIN_URL")
 GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_CREDENTIALS")
 os.environ["GEMINI_API_KEY"] = os.environ.get("GEMINI_API_KEY", "")
@@ -15,10 +14,18 @@ os.environ["GEMINI_API_KEY"] = os.environ.get("GEMINI_API_KEY", "")
 HEUTE = datetime.now().date()
 
 def get_garmin_data():
-    """Lädt die iCal-Datei von Garmin herunter."""
+    """Lädt die iCal-Datei von Garmin herunter und nutzt einen echten Browser-Header."""
     print("Lade Garmin iCal-Daten...")
-    response = requests.get(GARMIN_URL)
-    response.raise_for_status()
+    # Ein 'User-Agent' simuliert einen echten Browser, damit Garmin den Download nicht blockiert
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    response = requests.get(GARMIN_URL, headers=headers)
+    
+    # Falls Garmin blockiert, sehen wir jetzt genau warum:
+    if response.status_code != 200:
+        raise Exception(f"Garmin Download fehlgeschlagen! Status: {response.status_code}, Inhalt: {response.text[:200]}")
+        
     return response.text
 
 def get_google_access_token(info):
@@ -36,7 +43,6 @@ def get_google_access_token(info):
         'exp': exp
     }
     
-    # Signiert den Token direkt mit dem privaten Schlüssel aus dem JSON
     private_key = info['private_key']
     signed_jwt = jwt.encode(payload, private_key, algorithm='RS256')
     
@@ -48,6 +54,10 @@ def get_google_access_token(info):
         }
     )
     
+    # Falls Google hier fehlschlägt, fangen wir den Text ab, bevor der JSON-Parser abstürzt
+    if token_response.status_code != 200:
+        raise Exception(f"Google Token-Request fehlgeschlagen! Status: {token_response.status_code}, Inhalt: {token_response.text}")
+        
     token_data = token_response.json()
     if 'access_token' not in token_data:
         raise Exception(f"Google OAuth fehlgeschlagen: {token_data}")
@@ -67,8 +77,9 @@ def get_google_calendar_events(access_token):
     url = f"https://googleapis.com{now}&maxResults=100&singleEvents=true&orderBy=startTime"
     
     response = requests.get(url, headers=headers)
-    response.raise_for_status()
-    
+    if response.status_code != 200:
+        raise Exception(f"Google Kalender-Abruf fehlgeschlagen! Status: {response.status_code}, Inhalt: {response.text}")
+        
     events = response.json().get('items', [])
     cleaned_events = []
     for e in events:
@@ -137,7 +148,9 @@ def add_events_to_google(access_token, current_events, new_events):
         }
         
         response = requests.post(url, headers=headers, json=event_body)
-        response.raise_for_status()
+        if response.status_code != 200:
+            print(f"Fehler beim Eintragen von {title}: {response.text}")
+            continue
         print(f"Erfolgreich eingetragen: {title} für den {event['start']}")
 
 def main():
