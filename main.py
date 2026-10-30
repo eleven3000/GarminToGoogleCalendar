@@ -23,7 +23,7 @@ def get_garmin_data():
     return response.text
 
 def get_google_access_token(info):
-    """Holt den Access Token unabhängig von der GenAI-Library ab."""
+    """Holt den Access Token ab und tarnt die Anfrage vor der GitHub-IP-Sperre."""
     print("Generiere sicheren OAuth-Token via PyJWT...")
     iat = int(time.time())
     exp = iat + 3600
@@ -38,24 +38,36 @@ def get_google_access_token(info):
         'exp': exp
     }
     
+    # Sicherstellen, dass Zeilenumbrüche im Private Key aus den Secrets richtig interpretiert werden
     private_key = info['private_key']
+    if isinstance(private_key, str):
+        private_key = private_key.replace('\\n', '\n')
+        
     signed_jwt = jwt.encode(payload, private_key, algorithm='RS256')
     
+    # WICHTIG: Ein echter User-Agent verhindert, dass Google die GitHub-Server-IP blockiert
     headers = {
-        "Content-Type": "application/x-www-form-urlencoded"
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
+    
     data = {
         'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
         'assertion': signed_jwt
     }
     
     token_response = requests.post(GOOGLE_TOKEN_URL, headers=headers, data=data)
-    token_data = token_response.json()
     
+    # Falls Google blockiert, fangen wir den Fehler hier ab, bevor der JSON-Parser abstürzt
+    if token_response.status_code != 200:
+        raise Exception(f"Google Token-Request blockiert! Status: {token_response.status_code}, Inhalt: {token_response.text[:300]}")
+        
+    token_data = token_response.json()
     if 'access_token' not in token_data:
         raise Exception(f"Google OAuth fehlgeschlagen: {token_data}")
         
     return token_data['access_token']
+
 
 def get_google_calendar_events(access_token):
     """Holt alle Termine der nächsten 7 Tage direkt via HTTP REST-API."""
