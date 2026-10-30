@@ -4,8 +4,9 @@ import requests
 from datetime import datetime, timedelta
 from google import genai
 from google.genai import types
-from google.oauth2 import service_account  # Wichtig für den Fix
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
+import google.auth.transport.requests
 
 # Umgebungsvariablen von GitHub Secrets
 GARMIN_URL = os.environ.get("GARMIN_URL")
@@ -15,23 +16,27 @@ os.environ["GEMINI_API_KEY"] = os.environ.get("GEMINI_API_KEY", "")
 HEUTE = datetime.now().date()
 
 def get_garmin_data():
-    """Lädt die statische iCal-Datei von Garmin herunter."""
+    """Lädt die iCal-Datei von Garmin herunter."""
     print("Lade Garmin iCal-Daten...")
     response = requests.get(GARMIN_URL)
     response.raise_for_status()
     return response.text
 
 def get_google_calendar_events():
-    """Verbindet sich sicher mit Google via Service Account (FIXED)."""
+    """Verbindet sich mit Google und erzwingt das richtige Token-Format."""
     print("Verbinde mit Google Calendar...")
     info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
     
-    # FIX: Wir nutzen hier 'from_service_account_info' explizit mit dem richtigen Scope,
-    # damit Google uns den echten Access Token anstelle des ID-Tokens ausstellt.
+    # Hier definieren wir den Scope exakt
     scopes = ['https://googleapis.com']
     creds = service_account.Credentials.from_service_account_info(info, scopes=scopes)
     
-    # Das 'creds'-Objekt wird direkt an build() übergeben
+    # RADIKALER FIX: Wir zwingen Google hier manuell, das Token abzurufen.
+    # Das löst das 'No access token in response'-Problem in Cloud-Containern.
+    request = google.auth.transport.requests.Request()
+    creds.refresh(request)
+    
+    # Service mit den frisch erzwungenen Credentials aufbauen
     service = build('calendar', 'v3', credentials=creds)
     
     now = datetime.utcnow().isoformat() + 'Z'
