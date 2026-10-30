@@ -131,7 +131,7 @@ def ask_gemini_for_schedule(garmin_ical, google_events):
     """
     
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
